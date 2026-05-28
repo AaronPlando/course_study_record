@@ -112,28 +112,6 @@ async function patchExeIcon(targetExe) {
   console.log("EXE 图标写入完成。");
 }
 
-  mustExist(iconIco, "assets/app-icon.ico");
-
-  const rcedit = require("rcedit");
-
-  console.log("正在写入 EXE 图标和版本信息...");
-
-  await rcedit(targetExe, {
-    icon: iconIco,
-    "version-string": {
-      CompanyName: "AaronPlando",
-      FileDescription: productName,
-      ProductName: productName,
-      OriginalFilename: productExeName,
-      InternalName: "CourseStudyRecord"
-    },
-    "file-version": "1.4.1",
-    "product-version": "1.4.1"
-  });
-
-  console.log("EXE 图标写入完成。");
-}
-
 async function main() {
   console.log("==========================================================");
   console.log("课程学习记录 - 自定义免安装版打包");
