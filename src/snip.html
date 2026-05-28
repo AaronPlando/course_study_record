@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>截图框选</title>
+  <style>
+    * { box-sizing: border-box; user-select: none; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #000; cursor: crosshair; font-family: "Microsoft YaHei", Arial, sans-serif; }
+    #stage { position: fixed; inset: 0; overflow: hidden; }
+    #shot { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
+    #mask { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.30); pointer-events: none; }
+    #selection {
+      position: absolute;
+      display: none;
+      border: 2px solid #63e6be;
+      background: rgba(99, 230, 190, 0.035);
+      box-shadow: 0 0 0 99999px rgba(0, 0, 0, 0.34), 0 0 0 1px rgba(255, 255, 255, 0.65) inset;
+      pointer-events: none;
+    }
+    #selection::before, #selection::after {
+      content: "";
+      position: absolute;
+      background: rgba(255,255,255,0.95);
+    }
+    #selection::before { left: 50%; top: -7px; width: 9px; height: 9px; border-radius: 99px; transform: translateX(-50%); }
+    #selection::after { left: -7px; top: 50%; width: 9px; height: 9px; border-radius: 99px; transform: translateY(-50%); }
+    #sizeTip {
+      position: absolute;
+      display: none;
+      padding: 5px 8px;
+      border-radius: 9px;
+      color: #fff;
+      background: rgba(15, 23, 42, 0.86);
+      font-size: 12px;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    #toolbar {
+      position: absolute;
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 8px;
+      border-radius: 14px;
+      background: rgba(17, 24, 39, 0.86);
+      box-shadow: 0 12px 28px rgba(0,0,0,0.28);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+    button {
+      border: none;
+      border-radius: 10px;
+      padding: 8px 13px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #f8fafc;
+      background: rgba(255,255,255,0.14);
+      cursor: pointer;
+    }
+    button:hover { background: rgba(255,255,255,0.24); }
+    button.primary { color: #102a20; background: #86efac; }
+    button.primary:hover { background: #bbf7d0; }
+    #hint {
+      position: absolute;
+      left: 50%;
+      top: 18px;
+      transform: translateX(-50%);
+      padding: 9px 14px;
+      border-radius: 999px;
+      color: rgba(255,255,255,0.92);
+      background: rgba(15, 23, 42, 0.72);
+      box-shadow: 0 10px 24px rgba(0,0,0,0.2);
+      font-size: 13px;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    #error {
+      position: fixed;
+      inset: 0;
+      display: none;
+      place-items: center;
+      color: #fff;
+      background: #111827;
+      padding: 24px;
+      text-align: center;
+      line-height: 1.8;
+    }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <img id="shot" draggable="false" alt="屏幕截图" />
+    <div id="mask"></div>
+    <div id="selection"></div>
+    <div id="sizeTip"></div>
+    <div id="toolbar">
+      <button id="cancelBtn" type="button">取消 Esc</button>
+      <button id="fullBtn" type="button">保存全屏</button>
+      <button id="okBtn" class="primary" type="button">完成 Enter</button>
+    </div>
+    <div id="hint">拖动鼠标框选区域，Enter 完成，Esc 取消</div>
+  </div>
+  <div id="error">截图初始化失败，请关闭后重试。</div>
+
+  <script>
+    const shot = document.getElementById('shot');
+    const stage = document.getElementById('stage');
+    const selection = document.getElementById('selection');
+    const sizeTip = document.getElementById('sizeTip');
+    const toolbar = document.getElementById('toolbar');
+    const hint = document.getElementById('hint');
+    const errorBox = document.getElementById('error');
+    const okBtn = document.getElementById('okBtn');
+    const cancelBtn = document.getElementById('cancelBtn');
+    const fullBtn = document.getElementById('fullBtn');
+
+    let rect = null;
+    let start = null;
+    let dragging = false;
+    let imageReady = false;
+
+    function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
+
+    function normalizeRect(a, b) {
+      const x1 = clamp(Math.min(a.x, b.x), 0, window.innerWidth);
+      const y1 = clamp(Math.min(a.y, b.y), 0, window.innerHeight);
+      const x2 = clamp(Math.max(a.x, b.x), 0, window.innerWidth);
+      const y2 = clamp(Math.max(a.y, b.y), 0, window.innerHeight);
+      return { left: x1, top: y1, width: x2 - x1, height: y2 - y1 };
+    }
+
+    function updateOverlay() {
+      if (!rect || rect.width < 3 || rect.height < 3) {
+        selection.style.display = 'none';
+        toolbar.style.display = 'none';
+        sizeTip.style.display = 'none';
+        return;
+      }
+
+      selection.style.display = 'block';
+      selection.style.left = `${rect.left}px`;
+      selection.style.top = `${rect.top}px`;
+      selection.style.width = `${rect.width}px`;
+      selection.style.height = `${rect.height}px`;
+
+      sizeTip.style.display = 'block';
+      sizeTip.textContent = `${Math.round(rect.width)} × ${Math.round(rect.height)}`;
+      sizeTip.style.left = `${Math.min(window.innerWidth - 110, rect.left)}px`;
+      sizeTip.style.top = `${Math.max(8, rect.top - 32)}px`;
+
+      toolbar.style.display = 'flex';
+      const toolbarTop = rect.top + rect.height + 10;
+      const fallbackTop = rect.top - 52;
+      const top = toolbarTop + 48 < window.innerHeight ? toolbarTop : Math.max(8, fallbackTop);
+      const left = Math.min(window.innerWidth - 300, Math.max(8, rect.left + rect.width - 300));
+      toolbar.style.left = `${left}px`;
+      toolbar.style.top = `${top}px`;
+    }
+
+    function cropRectToDataUrl(targetRect) {
+      if (!imageReady) return null;
+      const sourceRect = targetRect || { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+      const ratioX = shot.naturalWidth / window.innerWidth;
+      const ratioY = shot.naturalHeight / window.innerHeight;
+      const sx = Math.max(0, Math.round(sourceRect.left * ratioX));
+      const sy = Math.max(0, Math.round(sourceRect.top * ratioY));
+      const sw = Math.max(1, Math.round(sourceRect.width * ratioX));
+      const sh = Math.max(1, Math.round(sourceRect.height * ratioY));
+      const canvas = document.createElement('canvas');
+      canvas.width = sw;
+      canvas.height = sh;
+      const context = canvas.getContext('2d', { alpha: false });
+      if (!context) return null;
+      context.imageSmoothingEnabled = false;
+      context.drawImage(shot, sx, sy, sw, sh, 0, 0, sw, sh);
+      return canvas.toDataURL('image/png');
+    }
+
+    function finish(dataUrl) {
+      window.screenshotSnipper.done(dataUrl ? { dataUrl } : null);
+    }
+
+    stage.addEventListener('mousedown', event => {
+      if (event.button !== 0 || event.target.tagName === 'BUTTON') return;
+      event.preventDefault();
+      dragging = true;
+      start = { x: event.clientX, y: event.clientY };
+      rect = normalizeRect(start, start);
+      hint.style.display = 'none';
+      updateOverlay();
+    });
+
+    window.addEventListener('mousemove', event => {
+      if (!dragging || !start) return;
+      event.preventDefault();
+      rect = normalizeRect(start, { x: event.clientX, y: event.clientY });
+      updateOverlay();
+    });
+
+    window.addEventListener('mouseup', event => {
+      if (!dragging) return;
+      dragging = false;
+      if (rect && (rect.width < 8 || rect.height < 8)) {
+        rect = null;
+      }
+      updateOverlay();
+    });
+
+    window.addEventListener('keydown', event => {
+      if (event.key === 'Escape') finish(null);
+      if (event.key === 'Enter') {
+        const data = rect && rect.width >= 8 && rect.height >= 8 ? cropRectToDataUrl(rect) : cropRectToDataUrl(null);
+        finish(data);
+      }
+    });
+
+    okBtn.onclick = () => {
+      const data = rect && rect.width >= 8 && rect.height >= 8 ? cropRectToDataUrl(rect) : cropRectToDataUrl(null);
+      finish(data);
+    };
+    cancelBtn.onclick = () => finish(null);
+    fullBtn.onclick = () => finish(cropRectToDataUrl(null));
+
+    window.screenshotSnipper.onInit(payload => {
+      if (!payload || !payload.dataUrl) {
+        errorBox.style.display = 'grid';
+        return;
+      }
+      shot.onload = () => { imageReady = true; };
+      shot.onerror = () => { errorBox.style.display = 'grid'; };
+      shot.src = payload.dataUrl;
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "course-study-record-desktop",
+  "version": "1.4.0-ci",
+  "description": "课程学习记录桌面版",
+  "main": "main.js",
+  "private": true,
+  "author": "AaronPlando",
+  "scripts": {
+    "start": "node ensure-electron.js && electron . --dev",
+    "build:portable": "node ensure-electron.js && node build-portable.js",
+    "dist": "node ensure-electron.js && node build-portable.js"
+  },
+  "devDependencies": {
+    "electron": "42.3.0"
+  }
+}
