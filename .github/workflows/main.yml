@@ -1,0 +1,43 @@
+name: Build Windows Portable
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-windows-portable:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Repair Electron runtime
+        run: node ensure-electron.js
+
+      - name: Build portable app
+        run: node build-portable.js
+
+      - name: Compress portable app
+        shell: powershell
+        run: |
+          if (Test-Path "课程学习记录-免安装版.zip") {
+            Remove-Item "课程学习记录-免安装版.zip"
+          }
+          Compress-Archive -Path "dist/win-unpacked/*" -DestinationPath "课程学习记录-免安装版.zip"
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: course-study-record-windows-portable
+          path: 课程学习记录-免安装版.zip
