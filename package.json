@@ -1,17 +1,17 @@
 {
   "name": "course-study-record-desktop",
-  "version": "1.4.1-icon",
+  "version": "1.4.1",
   "description": "课程学习记录桌面版",
   "main": "main.js",
-  "private": true,
   "author": "AaronPlando",
+  "license": "MIT",
+  "private": true,
   "scripts": {
     "start": "electron . --dev",
-    "build:portable": "node build-portable.js",
-    "dist": "node build-portable.js"
+    "build:portable": "node build-portable.js"
   },
-  "devDependencies": {
-    "electron": "42.3.0",
+  "dependencies": {
+    "electron": "^42.3.0",
     "rcedit": "^5.0.0"
   }
 }
