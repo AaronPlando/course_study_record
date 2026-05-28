@@ -130,6 +130,134 @@ select {
     }
 }
 
+.image-preview-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 3000;
+    display: flex;
+    flex-direction: column;
+    background: rgba(15, 23, 42, 0.92);
+    color: #ffffff;
+}
+
+.image-preview-topbar {
+    flex: 0 0 auto;
+    min-height: 58px;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    background: rgba(15, 23, 42, 0.86);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.image-preview-topbar strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.image-preview-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.image-preview-stage {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    cursor: grab;
+}
+
+.image-preview-stage img {
+    max-width: 92vw;
+    max-height: calc(100vh - 88px);
+    max-height: calc(100dvh - 88px);
+    object-fit: contain;
+    transform-origin: center center;
+    transition: transform 0.08s linear;
+    user-select: none;
+    -webkit-user-drag: none;
+    image-rendering: auto;
+}
+
+.image-preview-stage img.is-dragging {
+    cursor: grabbing;
+    transition: none;
+}
+
+.image-preview-loading {
+    position: absolute;
+    left: 50%;
+    bottom: 26px;
+    transform: translateX(-50%);
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.16);
+    color: rgba(255, 255, 255, 0.88);
+    font-size: 13px;
+    pointer-events: none;
+}
+
+        .example-image-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.example-image-button {
+    border: none;
+    padding: 0;
+    border-radius: 16px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.72);
+    box-shadow: 0 8px 18px rgba(102, 112, 133, 0.08);
+    cursor: pointer;
+    aspect-ratio: 4 / 3;
+}
+
+.example-image-button img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+    image-rendering: auto;
+}
+
+.example-image-button:hover {
+    opacity: 0.92;
+}
+        
+@media (max-width: 640px) {
+    .image-preview-topbar {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .image-preview-actions {
+        width: 100%;
+    }
+
+    .image-preview-actions .btn {
+        flex: 1;
+        min-width: 70px;
+    }
+
+    .image-preview-stage img {
+        max-width: 96vw;
+        max-height: calc(100vh - 132px);
+        max-height: calc(100dvh - 132px);
+    }
+}
+        
 .modal-overlay {
     position: fixed;
     inset: 0;
@@ -2601,6 +2729,55 @@ document.addEventListener("selectionchange", () => {
                 .replaceAll("'", "&#039;");
         }
 
+        function getImageThumbData(image) {
+    if (!image) return "";
+
+    return image.thumbData || image.data || image.url || "";
+}
+
+async function getImageFullData(image) {
+    if (!image) return "";
+
+    if (image.fullData) return image.fullData;
+
+    if (image.fileName && window.courseStudyDesktop && typeof window.courseStudyDesktop.readImageFull === "function") {
+        try {
+            const result = await window.courseStudyDesktop.readImageFull({
+                fileName: image.fileName
+            });
+
+            if (result && result.ok && result.data) {
+                return result.data;
+            }
+        } catch (error) {
+            console.warn("读取原图失败：", error);
+        }
+    }
+
+    return image.data || image.thumbData || image.url || "";
+}
+
+function imageViewerPayloadAttr(image) {
+    const payload = {
+        id: image && image.id ? image.id : "",
+        name: image && image.name ? image.name : "图片",
+        fileName: image && image.fileName ? image.fileName : "",
+        data: getImageThumbData(image),
+        thumbData: getImageThumbData(image),
+        hasFullImage: Boolean(image && image.fileName)
+    };
+
+    return escapeHtml(encodeURIComponent(JSON.stringify(payload)));
+}
+        
+function releaseImagePreviewSource() {
+    const previewImage = document.querySelector("#imagePreviewImage");
+
+    if (previewImage) {
+        previewImage.removeAttribute("src");
+    }
+}
+        
         function getCourse(courseId) {
             return state.courses.find(course => course.id === courseId);
         }
@@ -3265,209 +3442,227 @@ function flashPointAnchor(target) {
             render();
         }
 
-        function openImageViewerFromElement(imageElement) {
-            if (!imageElement) return;
-            const src = imageElement.getAttribute("data-full-src") || imageElement.currentSrc || imageElement.src;
-            const name = imageElement.getAttribute("data-image-name") || imageElement.alt || "图片";
-            openImageViewer(src, name);
+        function openImageFromElement(imageElement) {
+    if (!imageElement) return;
+
+    const payloadText = imageElement.getAttribute("data-image-payload");
+
+    if (payloadText) {
+        try {
+            const imageObject = JSON.parse(decodeURIComponent(payloadText));
+            openImageViewer(imageObject);
+            return;
+        } catch (error) {
+            console.warn("图片信息解析失败，改用缩略图预览：", error);
+        }
+    }
+
+    const src = imageElement.getAttribute("data-image-src") || imageElement.src;
+    const name = imageElement.getAttribute("data-image-name") || imageElement.alt || "图片";
+    const fileName = imageElement.getAttribute("data-image-file-name") || "";
+
+    openImageViewer({
+        name,
+        fileName,
+        data: src,
+        thumbData: src,
+        hasFullImage: Boolean(fileName)
+    });
+}
+
+        async function openImageViewer(imageOrSrc, name) {
+    let imageObject = null;
+
+    if (imageOrSrc && typeof imageOrSrc === "object") {
+        imageObject = imageOrSrc;
+    } else {
+        imageObject = {
+            name: name || "图片",
+            data: imageOrSrc || "",
+            thumbData: imageOrSrc || "",
+            fileName: ""
+        };
+    }
+
+    const title = imageObject.name || name || "图片";
+    const thumbSrc = getImageThumbData(imageObject);
+
+    if (!thumbSrc) return;
+
+    const oldViewer = document.querySelector(".image-viewer-overlay");
+
+    if (oldViewer) oldViewer.remove();
+
+    if (typeof activeImageViewerClose === "function") {
+        activeImageViewerClose(true);
+    }
+
+    let scale = 1;
+    let translateX = 0;
+    let translateY = 0;
+    let dragging = false;
+    let startX = 0;
+    let startY = 0;
+    let startTranslateX = 0;
+    let startTranslateY = 0;
+    let viewerHistoryPushed = false;
+
+    const overlay = document.createElement("div");
+    overlay.className = "image-viewer-overlay";
+
+    overlay.innerHTML = `
+        <div class="image-viewer-topbar">
+            <div class="image-viewer-title">${escapeHtml(title)}</div>
+            <div class="image-viewer-controls">
+                <button class="image-viewer-btn" type="button" data-action="zoom-out">－</button>
+                <button class="image-viewer-btn" type="button" data-action="reset">适应</button>
+                <button class="image-viewer-btn" type="button" data-action="zoom-in">＋</button>
+                <button class="image-viewer-close" type="button" data-action="close">关闭</button>
+            </div>
+        </div>
+        <div class="image-viewer-stage">
+            <img src="${escapeHtml(thumbSrc)}" alt="${escapeHtml(title)}" draggable="false" />
+            <div class="image-viewer-tip">正在加载原图...</div>
+        </div>
+    `;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.body.appendChild(overlay);
+
+    const image = overlay.querySelector("img");
+    const tip = overlay.querySelector(".image-viewer-tip");
+
+    function applyTransform() {
+        image.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+    }
+
+    function resetTransform() {
+        scale = 1;
+        translateX = 0;
+        translateY = 0;
+        applyTransform();
+    }
+
+    function closeViewer(skipHistoryBack = false) {
+        releaseImagePreviewSource();
+
+        if (overlay.parentNode) {
+            overlay.remove();
         }
 
-        function openImageViewer(src, name) {
-            if (!src) return;
-            const oldViewer = document.querySelector(".image-viewer-overlay");
-            if (oldViewer) oldViewer.remove();
-            if (typeof activeImageViewerClose === "function") activeImageViewerClose(true);
+        document.body.style.overflow = previousOverflow;
 
-            const overlay = document.createElement("div");
-            overlay.className = "image-viewer-overlay";
-            overlay.innerHTML = `
-                <div class="image-viewer-topbar">
-                    <div class="image-viewer-title">${escapeHtml(name || "图片")}</div>
-                    <div class="image-viewer-controls">
-                        <button class="image-viewer-btn" type="button" data-action="zoom-out">－</button>
-                        <button class="image-viewer-btn" type="button" data-action="reset">适应</button>
-                        <button class="image-viewer-btn" type="button" data-action="zoom-in">＋</button>
-                        <button class="image-viewer-close" type="button" data-action="close">关闭</button>
-                    </div>
-                </div>
-                <div class="image-viewer-stage">
-                    <img src="${escapeHtml(src)}" alt="${escapeHtml(name || "图片")}" draggable="false" />
-                    <div class="image-viewer-tip">双指缩放，放大后可拖动；手机返回键可关闭图片</div>
-                </div>
-            `;
+        window.removeEventListener("keydown", handleKeyDown);
+        window.removeEventListener("mousemove", handleMouseMove);
+        window.removeEventListener("mouseup", handleMouseUp);
 
-            const previousOverflow = document.body.style.overflow;
-            document.body.style.overflow = "hidden";
-            document.body.appendChild(overlay);
+        activeImageViewerClose = null;
 
-            let viewerHistoryPushed = false;
-            try {
-                if (window.history && window.history.pushState) {
-                    window.history.pushState({
-                        courseProgressRoute: getPlainRoute(route),
-                        appHistoryIndex,
-                        imageViewerOpen: true
-                    }, "", window.location.href);
-                    viewerHistoryPushed = true;
-                }
-            } catch (error) {
-                console.warn("图片预览历史记录写入失败：", error);
-            }
-
-            const stage = overlay.querySelector(".image-viewer-stage");
-            const image = overlay.querySelector("img");
-            const pointers = new Map();
-
-            let scale = 1;
-            let translateX = 0;
-            let translateY = 0;
-            let lastPan = null;
-            let pinchStartDistance = 0;
-            let pinchStartScale = 1;
-            const minScale = 1;
-            const maxScale = 6;
-            let isClosed = false;
-
-            const clampNumber = (value, min, max) => Math.min(max, Math.max(min, value));
-            const distanceOf = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-
-            const clampTranslate = () => {
-                if (scale <= 1.01) {
-                    translateX = 0;
-                    translateY = 0;
-                    return;
-                }
-
-                const maxX = Math.max(0, ((image.offsetWidth || stage.clientWidth) * scale - stage.clientWidth) / 2 + 80);
-                const maxY = Math.max(0, ((image.offsetHeight || stage.clientHeight) * scale - stage.clientHeight) / 2 + 80);
-                translateX = clampNumber(translateX, -maxX, maxX);
-                translateY = clampNumber(translateY, -maxY, maxY);
-            };
-
-            const applyTransform = () => {
-                clampTranslate();
-                image.style.transform = `translate3d(${translateX}px, ${translateY}px, 0) scale(${scale})`;
-            };
-
-            const setScale = nextScale => {
-                scale = clampNumber(nextScale, minScale, maxScale);
-                applyTransform();
-            };
-
-            const resetZoom = () => {
-                scale = 1;
-                translateX = 0;
-                translateY = 0;
-                applyTransform();
-            };
-
-            const closeImmediately = () => {
-                if (isClosed) return;
-                isClosed = true;
-                document.body.style.overflow = previousOverflow;
-                overlay.remove();
-                activeImageViewerClose = null;
-            };
-
-            const closeByButton = () => {
-                if (isClosed) return;
-                if (viewerHistoryPushed && window.history) {
-                    const fallbackTimer = setTimeout(() => {
-                        if (!isClosed) closeImmediately();
-                    }, 320);
-                    const oldClose = activeImageViewerClose;
-                    activeImageViewerClose = fromHistory => {
-                        clearTimeout(fallbackTimer);
-                        if (typeof oldClose === "function") oldClose(fromHistory);
-                    };
-                    window.history.back();
-                    return;
-                }
-                closeImmediately();
-            };
-
-            activeImageViewerClose = closeImmediately;
-
-            overlay.querySelector('[data-action="close"]').onclick = closeByButton;
-            overlay.querySelector('[data-action="reset"]').onclick = resetZoom;
-            overlay.querySelector('[data-action="zoom-in"]').onclick = () => setScale(scale * 1.25);
-            overlay.querySelector('[data-action="zoom-out"]').onclick = () => setScale(scale / 1.25);
-
-            stage.addEventListener("wheel", event => {
-                event.preventDefault();
-                const factor = event.deltaY < 0 ? 1.12 : 0.88;
-                setScale(scale * factor);
-            }, { passive: false });
-
-            stage.addEventListener("touchmove", event => {
-                event.preventDefault();
-            }, { passive: false });
-
-            stage.addEventListener("pointerdown", event => {
-                event.preventDefault();
-                image.classList.add("is-dragging");
-                stage.setPointerCapture(event.pointerId);
-                pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-
-                if (pointers.size === 1) {
-                    lastPan = { x: event.clientX, y: event.clientY, tx: translateX, ty: translateY };
-                } else if (pointers.size === 2) {
-                    const points = Array.from(pointers.values());
-                    pinchStartDistance = distanceOf(points[0], points[1]);
-                    pinchStartScale = scale;
-                    lastPan = null;
-                }
-            });
-
-            stage.addEventListener("pointermove", event => {
-                if (!pointers.has(event.pointerId)) return;
-                event.preventDefault();
-                pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-
-                if (pointers.size === 2) {
-                    const points = Array.from(pointers.values());
-                    const nextDistance = distanceOf(points[0], points[1]);
-                    if (pinchStartDistance > 0) {
-                        scale = clampNumber(pinchStartScale * nextDistance / pinchStartDistance, minScale, maxScale);
-                        applyTransform();
-                    }
-                    return;
-                }
-
-                if (pointers.size === 1 && lastPan && scale > 1.01) {
-                    translateX = lastPan.tx + event.clientX - lastPan.x;
-                    translateY = lastPan.ty + event.clientY - lastPan.y;
-                    applyTransform();
-                }
-            });
-
-            const endPointer = event => {
-                pointers.delete(event.pointerId);
-                if (pointers.size === 0) {
-                    image.classList.remove("is-dragging");
-                    lastPan = null;
-                    pinchStartDistance = 0;
-                    pinchStartScale = scale;
-                } else if (pointers.size === 1) {
-                    const only = Array.from(pointers.values())[0];
-                    lastPan = { x: only.x, y: only.y, tx: translateX, ty: translateY };
-                    pinchStartDistance = 0;
-                    pinchStartScale = scale;
-                }
-            };
-
-            stage.addEventListener("pointerup", endPointer);
-            stage.addEventListener("pointercancel", endPointer);
-            stage.addEventListener("dblclick", event => {
-                event.preventDefault();
-                if (scale > 1.01) resetZoom();
-                else setScale(2);
-            });
-
-            overlay.onclick = event => {
-                if (event.target === overlay) closeByButton();
-            };
+        if (!skipHistoryBack && viewerHistoryPushed && history.state && history.state.imageViewer) {
+            history.back();
         }
+    }
+
+    function handleKeyDown(event) {
+        if (event.key === "Escape") {
+            closeViewer();
+        }
+    }
+
+    function handleMouseMove(event) {
+        if (!dragging) return;
+
+        translateX = startTranslateX + event.clientX - startX;
+        translateY = startTranslateY + event.clientY - startY;
+
+        applyTransform();
+    }
+
+    function handleMouseUp() {
+        dragging = false;
+        image.classList.remove("is-dragging");
+    }
+
+    activeImageViewerClose = closeViewer;
+
+    overlay.addEventListener("click", event => {
+        if (event.target === overlay) {
+            closeViewer();
+        }
+    });
+
+    overlay.querySelector('[data-action="close"]').addEventListener("click", () => closeViewer());
+
+    overlay.querySelector('[data-action="zoom-out"]').addEventListener("click", () => {
+        scale = Math.max(0.25, scale / 1.2);
+        applyTransform();
+    });
+
+    overlay.querySelector('[data-action="zoom-in"]').addEventListener("click", () => {
+        scale = Math.min(8, scale * 1.2);
+        applyTransform();
+    });
+
+    overlay.querySelector('[data-action="reset"]').addEventListener("click", resetTransform);
+
+    overlay.addEventListener("wheel", event => {
+        event.preventDefault();
+
+        const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+
+        scale = Math.max(0.25, Math.min(8, scale * factor));
+        applyTransform();
+    }, { passive: false });
+
+    image.addEventListener("mousedown", event => {
+        event.preventDefault();
+
+        dragging = true;
+        startX = event.clientX;
+        startY = event.clientY;
+        startTranslateX = translateX;
+        startTranslateY = translateY;
+
+        image.classList.add("is-dragging");
+    });
+
+    image.addEventListener("dblclick", () => {
+        if (scale === 1) {
+            scale = 2;
+        } else {
+            resetTransform();
+            return;
+        }
+
+        applyTransform();
+    });
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+
+    if (!(history.state && history.state.imageViewer)) {
+        history.pushState({ imageViewer: true }, "");
+        viewerHistoryPushed = true;
+    }
+
+    applyTransform();
+
+    try {
+        const fullSrc = await getImageFullData(imageObject);
+
+        if (overlay.parentNode && fullSrc) {
+            image.src = fullSrc;
+        }
+    } catch (error) {
+        console.warn("原图加载失败，继续使用缩略图：", error);
+    } finally {
+        if (tip && tip.parentNode) {
+            tip.remove();
+        }
+    }
+}
 
         function loadScreenshotShortcut() {
             try {
@@ -4469,7 +4664,7 @@ function flashPointAnchor(target) {
                     <div class="example-image-grid">
                         ${images.map(image => `
                             <div class="example-image-item">
-                                <img src="${escapeHtml(image.data)}" alt="${escapeHtml(image.name || "例题图片")}" data-full-src="${escapeHtml(image.data)}" data-image-name="${escapeHtml(image.name || "例题图片")}" onclick="openImageViewerFromElement(this)" loading="lazy" />
+                                <img src="${escapeHtml(getImageThumbData(image))}" alt="${escapeHtml(image.name || "例题图片")}" data-image-src="${escapeHtml(getImageThumbData(image))}" data-image-name="${escapeHtml(image.name || "图片")}" data-image-file-name="${escapeHtml(image.fileName || "")}" data-image-payload="${imageViewerPayloadAttr(image)}" onclick="openImageFromElement(this)" loading="lazy" />
                                 <div class="example-image-name">${escapeHtml(image.name || "图片")}</div>
                             </div>
                         `).join("")}
@@ -4593,7 +4788,7 @@ function flashPointAnchor(target) {
                 <div class="example-image-grid">
                     ${images.map(image => `
                         <div class="example-image-item">
-                            <img src="${escapeHtml(image.data)}" alt="${escapeHtml(image.name || "例题图片")}" data-full-src="${escapeHtml(image.data)}" data-image-name="${escapeHtml(image.name || "例题图片")}" onclick="openImageViewerFromElement(this)" loading="lazy" />
+                            <img src="${escapeHtml(getImageThumbData(image))}" alt="${escapeHtml(image.name || "例题图片")}" data-image-src="${escapeHtml(getImageThumbData(image))}" data-image-name="${escapeHtml(image.name || "图片")}" data-image-file-name="${escapeHtml(image.fileName || "")}" data-image-payload="${imageViewerPayloadAttr(image)}" onclick="openImageFromElement(this)" loading="lazy" />
                             <button class="example-image-delete" title="删除图片" onclick="deleteExampleImage('${course.id}', '${chapter.id}', '${point.id}', '${example.id}', '${image.id}')">×</button>
                             <div class="example-image-name">${escapeHtml(image.name || "图片")}</div>
                         </div>
@@ -4660,7 +4855,7 @@ function flashPointAnchor(target) {
                     <div class="example-image-grid">
                         ${images.map(image => `
                             <div class="example-image-item">
-                                <img src="${escapeHtml(image.data)}" alt="${escapeHtml(image.name || "例题图片")}" data-full-src="${escapeHtml(image.data)}" data-image-name="${escapeHtml(image.name || "例题图片")}" onclick="openImageViewerFromElement(this)" loading="lazy" />
+                                <img src="${escapeHtml(getImageThumbData(image))}" alt="${escapeHtml(image.name || "例题图片")}" data-image-src="${escapeHtml(getImageThumbData(image))}" data-image-name="${escapeHtml(image.name || "图片")}" data-image-file-name="${escapeHtml(image.fileName || "")}" data-image-payload="${imageViewerPayloadAttr(image)}" onclick="openImageFromElement(this)" loading="lazy" />
                                 <div class="example-image-name">${escapeHtml(image.name || "图片")}</div>
                             </div>
                         `).join("")}
