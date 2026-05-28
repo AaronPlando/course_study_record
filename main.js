@@ -697,6 +697,8 @@ ipcMain.handle('image:read-full', async (event, payload = {}) => {
  return { ok: true, data };
 });
 
+}
+  
 function sendMenuAction(action) {
   const win = BrowserWindow.getFocusedWindow() || mainWindow;
   if (win && !win.isDestroyed()) {
