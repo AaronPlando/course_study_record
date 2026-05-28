@@ -8,7 +8,7 @@
     * { box-sizing: border-box; user-select: none; }
     html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #000; cursor: crosshair; font-family: "Microsoft YaHei", Arial, sans-serif; }
     #stage { position: fixed; inset: 0; overflow: hidden; }
-    #shot { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
+    #shot { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; image-rendering: auto; }
     #mask { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.30); pointer-events: none; }
     #selection {
       position: absolute;
@@ -159,23 +159,52 @@
     }
 
     function cropRectToDataUrl(targetRect) {
-      if (!imageReady) return null;
-      const sourceRect = targetRect || { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
-      const ratioX = shot.naturalWidth / window.innerWidth;
-      const ratioY = shot.naturalHeight / window.innerHeight;
-      const sx = Math.max(0, Math.round(sourceRect.left * ratioX));
-      const sy = Math.max(0, Math.round(sourceRect.top * ratioY));
-      const sw = Math.max(1, Math.round(sourceRect.width * ratioX));
-      const sh = Math.max(1, Math.round(sourceRect.height * ratioY));
-      const canvas = document.createElement('canvas');
-      canvas.width = sw;
-      canvas.height = sh;
-      const context = canvas.getContext('2d', { alpha: false });
-      if (!context) return null;
-      context.imageSmoothingEnabled = false;
-      context.drawImage(shot, sx, sy, sw, sh, 0, 0, sw, sh);
-      return canvas.toDataURL('image/png');
-    }
+ if (!imageReady) return null;
+
+ const shotRect = shot.getBoundingClientRect();
+
+ const sourceRect = targetRect || {
+  left: shotRect.left,
+  top: shotRect.top,
+  width: shotRect.width,
+  height: shotRect.height
+ };
+
+ const safeLeft = Math.max(shotRect.left, sourceRect.left);
+ const safeTop = Math.max(shotRect.top, sourceRect.top);
+ const safeRight = Math.min(shotRect.right, sourceRect.left + sourceRect.width);
+ const safeBottom = Math.min(shotRect.bottom, sourceRect.top + sourceRect.height);
+
+ const safeWidth = Math.max(1, safeRight - safeLeft);
+ const safeHeight = Math.max(1, safeBottom - safeTop);
+
+ const ratioX = shot.naturalWidth / shotRect.width;
+ const ratioY = shot.naturalHeight / shotRect.height;
+
+ const sx = Math.max(0, Math.round((safeLeft - shotRect.left) * ratioX));
+ const sy = Math.max(0, Math.round((safeTop - shotRect.top) * ratioY));
+ const sw = Math.max(1, Math.round(safeWidth * ratioX));
+ const sh = Math.max(1, Math.round(safeHeight * ratioY));
+
+ const canvas = document.createElement('canvas');
+
+ canvas.width = sw;
+ canvas.height = sh;
+
+ const context = canvas.getContext('2d', {
+  alpha: false,
+  willReadFrequently: false
+ });
+
+ if (!context) return null;
+
+ context.imageSmoothingEnabled = false;
+ context.fillStyle = '#ffffff';
+ context.fillRect(0, 0, sw, sh);
+ context.drawImage(shot, sx, sy, sw, sh, 0, 0, sw, sh);
+
+ return canvas.toDataURL('image/png');
+}
 
     function finish(dataUrl) {
       window.screenshotSnipper.done(dataUrl ? { dataUrl } : null);
