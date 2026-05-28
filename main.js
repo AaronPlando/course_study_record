@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, session, desktopCapturer, ipcMain, screen, dialog, shell } = require('electron');
+const { app, BrowserWindow, Menu, session, desktopCapturer, ipcMain, screen, dialog, shell, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -21,6 +21,10 @@ function getImagesDir() {
   return path.join(getDataDir(), 'images');
 }
 
+function getThumbsDir() {
+ return path.join(getDataDir(), 'thumbs');
+}
+
 function getBackupsDir() {
   return path.join(getDataDir(), 'backups');
 }
@@ -30,9 +34,10 @@ function getDataFilePath() {
 }
 
 function ensureAppDataDirs() {
-  fs.mkdirSync(getDataDir(), { recursive: true });
-  fs.mkdirSync(getImagesDir(), { recursive: true });
-  fs.mkdirSync(getBackupsDir(), { recursive: true });
+ fs.mkdirSync(getDataDir(), { recursive: true });
+ fs.mkdirSync(getImagesDir(), { recursive: true });
+ fs.mkdirSync(getThumbsDir(), { recursive: true });
+ fs.mkdirSync(getBackupsDir(), { recursive: true });
 }
 
 function safeReadJson(filePath, fallback = null) {
@@ -99,123 +104,235 @@ function createThrottledBackup(reason = 'auto-save') {
 }
 
 function dataUrlToBuffer(dataUrl) {
-  const match = String(dataUrl || '').match(/^data:([^;,]+)?(;base64)?,(.*)$/);
-  if (!match) return null;
-  const mime = match[1] || 'image/png';
-  const isBase64 = Boolean(match[2]);
-  const body = match[3] || '';
-  const buffer = isBase64 ? Buffer.from(body, 'base64') : Buffer.from(decodeURIComponent(body), 'utf-8');
-  return { mime, buffer };
+ const match = String(dataUrl || '').match(/^data:([^;,]+)?(;base64)?,(.*)$/);
+
+ if (!match) return null;
+
+ const mime = match[1] || 'image/png';
+ const isBase64 = Boolean(match[2]);
+ const body = match[3] || '';
+ const buffer = isBase64 ? Buffer.from(body, 'base64') : Buffer.from(decodeURIComponent(body), 'utf-8');
+
+ return { mime, buffer };
 }
 
 function mimeToExt(mime, fallbackName = '') {
-  const lowerMime = String(mime || '').toLowerCase();
-  const lowerName = String(fallbackName || '').toLowerCase();
-  if (lowerMime.includes('jpeg') || lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) return 'jpg';
-  if (lowerMime.includes('webp') || lowerName.endsWith('.webp')) return 'webp';
-  if (lowerMime.includes('gif') || lowerName.endsWith('.gif')) return 'gif';
-  if (lowerMime.includes('bmp') || lowerName.endsWith('.bmp')) return 'bmp';
-  return 'png';
+ const lowerMime = String(mime || '').toLowerCase();
+ const lowerName = String(fallbackName || '').toLowerCase();
+
+ if (lowerMime.includes('jpeg') || lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) return 'jpg';
+ if (lowerMime.includes('webp') || lowerName.endsWith('.webp')) return 'webp';
+ if (lowerMime.includes('gif') || lowerName.endsWith('.gif')) return 'gif';
+ if (lowerMime.includes('bmp') || lowerName.endsWith('.bmp')) return 'bmp';
+
+ return 'png';
 }
 
-function writeImageDataUrl(dataUrl, preferredName = '') {
-  ensureAppDataDirs();
-  const parsed = dataUrlToBuffer(dataUrl);
-  if (!parsed || !parsed.buffer.length) return null;
+function getMimeByFileName(fileName) {
+ const ext = path.extname(fileName || '').replace('.', '').toLowerCase();
 
-  const ext = mimeToExt(parsed.mime, preferredName);
-  const imageId = crypto.randomBytes(8).toString('hex');
-  const fileName = `img_${Date.now()}_${imageId}.${ext}`;
-  fs.writeFileSync(path.join(getImagesDir(), fileName), parsed.buffer);
-  return fileName;
+ const mimeMap = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  bmp: 'image/bmp'
+ };
+
+ return mimeMap[ext] || 'image/png';
+}
+
+function getThumbFileName(fileName) {
+ const parsed = path.parse(fileName || '');
+
+ if (!parsed.name) return '';
+
+ return `${parsed.name}_thumb.png`;
+}
+
+function readImageFileAsDataUrl(dir, fileName) {
+ try {
+  if (!fileName) return '';
+
+  const imagePath = path.join(dir, fileName);
+
+  if (!fs.existsSync(imagePath)) return '';
+
+  const mime = getMimeByFileName(fileName);
+  const data = fs.readFileSync(imagePath).toString('base64');
+
+  return `data:${mime};base64,${data}`;
+ } catch (error) {
+  console.warn('读取图片失败：', error);
+  return '';
+ }
 }
 
 function readImageAsDataUrl(fileName) {
-  try {
-    if (!fileName) return '';
-    const imagePath = path.join(getImagesDir(), fileName);
-    if (!fs.existsSync(imagePath)) return '';
-    const ext = path.extname(fileName).replace('.', '').toLowerCase();
-    const mimeMap = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp' };
-    const mime = mimeMap[ext] || 'image/png';
-    return `data:${mime};base64,${fs.readFileSync(imagePath).toString('base64')}`;
-  } catch (error) {
-    console.warn('读取图片失败：', error);
-    return '';
-  }
+ return readImageFileAsDataUrl(getImagesDir(), fileName);
+}
+
+function readImageThumbAsDataUrl(fileName) {
+ const thumbName = getThumbFileName(fileName);
+ return readImageFileAsDataUrl(getThumbsDir(), thumbName);
+}
+
+function ensureThumbnailForFile(fileName) {
+ try {
+  if (!fileName) return '';
+
+  ensureAppDataDirs();
+
+  const sourcePath = path.join(getImagesDir(), fileName);
+  const thumbName = getThumbFileName(fileName);
+  const thumbPath = path.join(getThumbsDir(), thumbName);
+
+  if (!fs.existsSync(sourcePath)) return '';
+  if (fs.existsSync(thumbPath)) return thumbName;
+
+  const buffer = fs.readFileSync(sourcePath);
+  const sourceImage = nativeImage.createFromBuffer(buffer);
+
+  if (sourceImage.isEmpty()) return '';
+
+  const size = sourceImage.getSize();
+  const maxWidth = 420;
+  const nextWidth = Math.min(maxWidth, Math.max(1, size.width || maxWidth));
+
+  const thumbImage = sourceImage.resize({
+   width: nextWidth,
+   quality: 'best'
+  });
+
+  fs.writeFileSync(thumbPath, thumbImage.toPNG());
+
+  return thumbName;
+ } catch (error) {
+  console.warn('生成缩略图失败：', error);
+  return '';
+ }
+}
+
+function writeImageDataUrl(dataUrl, preferredName = '') {
+ ensureAppDataDirs();
+
+ const parsed = dataUrlToBuffer(dataUrl);
+
+ if (!parsed || !parsed.buffer.length) return null;
+
+ let ext = mimeToExt(parsed.mime, preferredName);
+
+ // 截图、公式、文字图片优先保存 PNG，避免 JPEG 压缩导致文字发糊。
+ if (String(parsed.mime || '').toLowerCase().includes('png')) {
+  ext = 'png';
+ }
+
+ const imageId = crypto.randomBytes(8).toString('hex');
+ const fileName = `img_${Date.now()}_${imageId}.${ext}`;
+ const imagePath = path.join(getImagesDir(), fileName);
+
+ fs.writeFileSync(imagePath, parsed.buffer);
+ ensureThumbnailForFile(fileName);
+
+ return fileName;
 }
 
 function clonePlain(value) {
-  return JSON.parse(JSON.stringify(value || {}));
+ return JSON.parse(JSON.stringify(value || {}));
 }
 
 function walkImagesInState(state, callback) {
-  const courses = Array.isArray(state && state.courses) ? state.courses : [];
-  courses.forEach(course => {
-    (course.chapters || []).forEach(chapter => {
-      (chapter.points || []).forEach(point => {
-        (point.examples || []).forEach(example => {
-          if (!Array.isArray(example.images)) example.images = [];
-          example.images = example.images.map(image => callback(image, example)).filter(Boolean);
-        });
-      });
+ const courses = Array.isArray(state && state.courses) ? state.courses : [];
+
+ courses.forEach(course => {
+  (course.chapters || []).forEach(chapter => {
+   (chapter.points || []).forEach(point => {
+    (point.examples || []).forEach(example => {
+     if (!Array.isArray(example.images)) example.images = [];
+     example.images = example.images.map(image => callback(image, example)).filter(Boolean);
     });
+   });
   });
+ });
 }
 
 function persistImagesForStorage(rawState) {
-  const state = clonePlain(rawState || { courses: [] });
-  walkImagesInState(state, image => {
-    if (!image) return null;
-    const next = {
-      id: image.id || crypto.randomBytes(6).toString('hex'),
-      name: image.name || '图片'
-    };
+ const state = clonePlain(rawState || { courses: [] });
 
-    if (image.fileName) {
-      next.fileName = image.fileName;
-      return next;
-    }
+ walkImagesInState(state, image => {
+  if (!image) return null;
 
-    const data = image.data || image.url || '';
-    if (String(data).startsWith('data:image/')) {
-      const fileName = writeImageDataUrl(data, image.name || '图片');
-      if (!fileName) return null;
-      next.fileName = fileName;
-      return next;
-    }
+  const next = {
+   id: image.id || crypto.randomBytes(6).toString('hex'),
+   name: image.name || '图片'
+  };
 
-    return null;
-  });
-  return state;
+  if (image.fileName) {
+   next.fileName = image.fileName;
+   ensureThumbnailForFile(image.fileName);
+   return next;
+  }
+
+  const data = image.fullData || image.data || image.url || '';
+
+  if (String(data).startsWith('data:image/')) {
+   const fileName = writeImageDataUrl(data, image.name || '图片');
+
+   if (!fileName) return null;
+
+   next.fileName = fileName;
+   return next;
+  }
+
+  return null;
+ });
+
+ return state;
 }
 
 function hydrateImagesForRenderer(rawState) {
-  const state = clonePlain(rawState || { courses: [] });
-  walkImagesInState(state, image => {
-    if (!image) return null;
-    const next = {
-      id: image.id || crypto.randomBytes(6).toString('hex'),
-      name: image.name || '图片',
-      fileName: image.fileName || ''
-    };
+ const state = clonePlain(rawState || { courses: [] });
 
-    if (image.fileName) {
-      next.data = readImageAsDataUrl(image.fileName);
-      return next.data ? next : null;
-    }
+ walkImagesInState(state, image => {
+  if (!image) return null;
 
-    const data = image.data || image.url || '';
-    if (String(data).startsWith('data:image/')) {
-      const fileName = writeImageDataUrl(data, image.name || '图片');
-      next.fileName = fileName || '';
-      next.data = data;
-      return next;
-    }
+  const next = {
+   id: image.id || crypto.randomBytes(6).toString('hex'),
+   name: image.name || '图片',
+   fileName: image.fileName || '',
+   hasFullImage: Boolean(image.fileName)
+  };
 
-    return null;
-  });
-  return state;
+  if (image.fileName) {
+   ensureThumbnailForFile(image.fileName);
+
+   const thumbData = readImageThumbAsDataUrl(image.fileName);
+   const fallbackData = thumbData || readImageAsDataUrl(image.fileName);
+
+   next.data = fallbackData;
+   next.thumbData = thumbData || fallbackData;
+
+   return next.data ? next : null;
+  }
+
+  const data = image.fullData || image.data || image.url || '';
+
+  if (String(data).startsWith('data:image/')) {
+   const fileName = writeImageDataUrl(data, image.name || '图片');
+
+   next.fileName = fileName || '';
+   next.hasFullImage = Boolean(fileName);
+   next.data = fileName ? (readImageThumbAsDataUrl(fileName) || data) : data;
+   next.thumbData = next.data;
+
+   return next;
+  }
+
+  return null;
+ });
+
+ return state;
 }
 
 function loadCourseDataForRenderer() {
@@ -335,22 +452,39 @@ function findScreenSourceForDisplay(sources, display) {
 }
 
 async function captureDisplayDataUrl(display) {
-  const scaleFactor = display && display.scaleFactor ? display.scaleFactor : 1;
-  const width = Math.max(1, Math.round((display.size.width || display.bounds.width) * scaleFactor));
-  const height = Math.max(1, Math.round((display.size.height || display.bounds.height) * scaleFactor));
+ const scaleFactor = display && display.scaleFactor ? display.scaleFactor : 1;
 
-  const sources = await desktopCapturer.getSources({
-    types: ['screen'],
-    thumbnailSize: { width, height },
-    fetchWindowIcons: false
-  });
+ const boundsWidth = display && display.bounds ? display.bounds.width : 1920;
+ const boundsHeight = display && display.bounds ? display.bounds.height : 1080;
+ const sizeWidth = display && display.size ? display.size.width : boundsWidth;
+ const sizeHeight = display && display.size ? display.size.height : boundsHeight;
 
-  const source = findScreenSourceForDisplay(sources, display);
-  if (!source || !source.thumbnail || source.thumbnail.isEmpty()) {
-    throw new Error('没有获取到屏幕截图');
-  }
+ const width = Math.max(
+  1,
+  Math.round(Math.max(sizeWidth, boundsWidth * scaleFactor))
+ );
 
-  return source.thumbnail.toDataURL();
+ const height = Math.max(
+  1,
+  Math.round(Math.max(sizeHeight, boundsHeight * scaleFactor))
+ );
+
+ const sources = await desktopCapturer.getSources({
+  types: ['screen'],
+  thumbnailSize: { width, height },
+  fetchWindowIcons: false
+ });
+
+ const source = findScreenSourceForDisplay(sources, display);
+
+ if (!source || !source.thumbnail || source.thumbnail.isEmpty()) {
+  throw new Error('没有获取到屏幕截图');
+ }
+
+ // 强制使用 PNG，避免文字截图被 JPEG 压缩糊掉。
+ const pngBuffer = source.thumbnail.toPNG();
+
+ return `data:image/png;base64,${pngBuffer.toString('base64')}`;
 }
 
 function createSnipWindow(ownerWindow, display, payload) {
@@ -531,11 +665,37 @@ function setupDataIpc() {
   });
   ipcMain.handle('data:create-backup', async (event, reason) => ({ ok: true, backupPath: createBackup(reason || 'manual') }));
   ipcMain.handle('image:save-data-url', async (event, payload = {}) => {
-    const fileName = writeImageDataUrl(payload.dataUrl || '', payload.name || '图片');
-    if (!fileName) return { ok: false, error: '图片保存失败' };
-    return { ok: true, image: { id: payload.id || crypto.randomBytes(6).toString('hex'), name: payload.name || '图片', fileName, data: readImageAsDataUrl(fileName) } };
-  });
-}
+ const fileName = writeImageDataUrl(payload.dataUrl || '', payload.name || '图片');
+
+ if (!fileName) return { ok: false, error: '图片保存失败' };
+
+ const thumbData = readImageThumbAsDataUrl(fileName);
+ const fallbackData = thumbData || readImageAsDataUrl(fileName);
+
+ return {
+  ok: true,
+  image: {
+   id: payload.id || crypto.randomBytes(6).toString('hex'),
+   name: payload.name || '图片',
+   fileName,
+   data: fallbackData,
+   thumbData: fallbackData,
+   hasFullImage: true
+  }
+ };
+});
+
+ipcMain.handle('image:read-full', async (event, payload = {}) => {
+ const fileName = payload.fileName || '';
+
+ if (!fileName) return { ok: false, error: '缺少图片文件名', data: '' };
+
+ const data = readImageAsDataUrl(fileName);
+
+ if (!data) return { ok: false, error: '原图读取失败', data: '' };
+
+ return { ok: true, data };
+});
 
 function sendMenuAction(action) {
   const win = BrowserWindow.getFocusedWindow() || mainWindow;
