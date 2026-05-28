@@ -19,32 +19,59 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install dependencies
-        shell: cmd
-        env:
-          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
-        run: npm install
+      - name: Configure npm and Electron mirror
+        shell: powershell
+        run: |
+          npm config delete proxy
+          npm config delete https-proxy
+          npm config set registry https://registry.npmmirror.com
+          npm config set ignore-scripts false
+          echo "ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/" >> $env:GITHUB_ENV
+          echo "ELECTRON_CUSTOM_DIR={{ version }}" >> $env:GITHUB_ENV
 
-      - name: Repair Electron runtime
-        shell: cmd
-        env:
-          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
-        run: node ensure-electron.js
+      - name: Install dependencies
+        shell: powershell
+        run: |
+          if (Test-Path "package-lock.json") {
+            npm ci --foreground-scripts
+          } else {
+            npm install --foreground-scripts
+          }
+
+      - name: Force install Electron runtime
+        shell: powershell
+        run: |
+          if (!(Test-Path "node_modules/electron/path.txt")) {
+            Write-Host "Electron runtime is incomplete. Running Electron install script..."
+            node node_modules/electron/install.js
+          }
+          if (!(Test-Path "node_modules/electron/path.txt")) {
+            Write-Host "Electron runtime is still incomplete. Reinstalling electron package..."
+            npm uninstall electron
+            npm install electron --save-dev --foreground-scripts
+          }
+          if (!(Test-Path "node_modules/electron/path.txt")) {
+            throw "Electron runtime install failed: node_modules/electron/path.txt still does not exist."
+          }
+          Write-Host "Electron runtime ready."
 
       - name: Build portable app
-        shell: cmd
+        shell: powershell
         run: node build-portable.js
 
       - name: Compress portable app
         shell: powershell
         run: |
-          if (Test-Path "课程学习记录-免安装版.zip") {
-            Remove-Item "课程学习记录-免安装版.zip"
+          if (!(Test-Path "dist/win-unpacked")) {
+            throw "dist/win-unpacked was not generated."
           }
-          Compress-Archive -Path "dist/win-unpacked/*" -DestinationPath "课程学习记录-免安装版.zip"
+          if (Test-Path "course-study-record-windows-portable.zip") {
+            Remove-Item "course-study-record-windows-portable.zip" -Force
+          }
+          Compress-Archive -Path "dist/win-unpacked/*" -DestinationPath "course-study-record-windows-portable.zip"
 
       - name: Upload portable artifact
         uses: actions/upload-artifact@v4
         with:
           name: course-study-record-windows-portable
-          path: 课程学习记录-免安装版.zip
+          path: course-study-record-windows-portable.zip
