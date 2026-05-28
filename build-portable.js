@@ -79,6 +79,41 @@ async function patchExeIcon(targetExe) {
 
   mustExist(iconIco, "assets/app-icon.ico");
 
+  const rceditModule = require("rcedit");
+
+  const rcedit =
+    typeof rceditModule === "function"
+      ? rceditModule
+      : typeof rceditModule.default === "function"
+        ? rceditModule.default
+        : typeof rceditModule.rcedit === "function"
+          ? rceditModule.rcedit
+          : null;
+
+  if (!rcedit) {
+    throw new Error("无法正确加载 rcedit。请检查 package.json 里的 rcedit 依赖是否正常安装。");
+  }
+
+  console.log("正在写入 EXE 图标和版本信息...");
+
+  await rcedit(targetExe, {
+    icon: iconIco,
+    "version-string": {
+      CompanyName: "AaronPlando",
+      FileDescription: productName,
+      ProductName: productName,
+      OriginalFilename: productExeName,
+      InternalName: "CourseStudyRecord"
+    },
+    "file-version": "1.4.1",
+    "product-version": "1.4.1"
+  });
+
+  console.log("EXE 图标写入完成。");
+}
+
+  mustExist(iconIco, "assets/app-icon.ico");
+
   const rcedit = require("rcedit");
 
   console.log("正在写入 EXE 图标和版本信息...");
