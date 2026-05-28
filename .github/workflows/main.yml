@@ -20,53 +20,31 @@ jobs:
           node-version: 22
 
       - name: Install dependencies
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          npm config set registry https://registry.npmmirror.com
-          npm config set electron_mirror https://npmmirror.com/mirrors/electron/
-          $env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
-          npm install --foreground-scripts
+        shell: cmd
+        env:
+          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+        run: npm install
 
-      - name: Ensure Electron runtime
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $env:ELECTRON_MIRROR = "https://npmmirror.com/mirrors/electron/"
-
-          if (!(Test-Path "node_modules/electron/path.txt")) {
-            Write-Host "Electron runtime is incomplete. Rebuilding electron..."
-            npm rebuild electron --foreground-scripts
-          }
-
-          if (!(Test-Path "node_modules/electron/path.txt")) {
-            Write-Host "Electron runtime is still incomplete. Reinstalling electron..."
-            npm install electron@42.3.0 --save-dev --foreground-scripts
-          }
-
-          if (!(Test-Path "node_modules/electron/path.txt")) {
-            throw "Electron runtime repair failed: node_modules/electron/path.txt still does not exist."
-          }
-
-          node -e "console.log('Electron path:', require('electron'))"
+      - name: Repair Electron runtime
+        shell: cmd
+        env:
+          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+        run: node ensure-electron.js
 
       - name: Build portable app
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          node build-portable.js
+        shell: cmd
+        run: node build-portable.js
 
       - name: Compress portable app
-        shell: pwsh
+        shell: powershell
         run: |
-          $ErrorActionPreference = "Stop"
-          if (Test-Path "course-study-record-windows-portable.zip") {
-            Remove-Item "course-study-record-windows-portable.zip" -Force
+          if (Test-Path "课程学习记录-免安装版.zip") {
+            Remove-Item "课程学习记录-免安装版.zip"
           }
-          Compress-Archive -Path "dist/win-unpacked/*" -DestinationPath "course-study-record-windows-portable.zip" -Force
+          Compress-Archive -Path "dist/win-unpacked/*" -DestinationPath "课程学习记录-免安装版.zip"
 
       - name: Upload portable artifact
         uses: actions/upload-artifact@v4
         with:
           name: course-study-record-windows-portable
-          path: course-study-record-windows-portable.zip
+          path: 课程学习记录-免安装版.zip
